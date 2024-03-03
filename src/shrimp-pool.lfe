@@ -2,6 +2,7 @@
   (behaviour gen_server)
   (export (start 1))
   (export (init 1))
+  (export (initial-state 1))
   (export (terminate 2))
   (export (handle_cast 2))
   (export (handle_call 3))
@@ -12,7 +13,8 @@
   (export (status? 1))
   (export (count 1))
   (export (update 2))
-  (export (release 2)))
+  (export (release 2))
+  (export (do-reply 2)))
 
 (defun callback-module () (MODULE))
 
@@ -151,8 +153,7 @@
    (tuple 'reply (tuple 'error status) state)))
 
 (defun do-acquire
-  ([caller (= (map 'pool '()
-                   'status status)
+  ([caller (= (map 'status status)
               state)] (when (orelse (== status 'down) 
                                     (== status 'draining)))
    (tuple 'reply (tuple 'error status) state))
@@ -195,7 +196,7 @@
    ;; this is the last conn I'm going to close,
    ;; so, I'll reply ok to the drain caller and set status
    ;; to 'down and call it a day
-   (gen_server:reply waiter 'ok)
+   (shrimp-pool:do-reply waiter 'ok)
    (tuple 'reply 'ok 
           (maps:merge state
                       (map 'pool '()
@@ -215,10 +216,20 @@
                         'wait-list (cons waiting waitlist))
                    state)]
    (let
-     [('ok (gen_server:reply waiting (tuple 'ok conn)))]
+     ;;[('ok (gen_server:reply waiting (tuple 'ok conn)))]
+     [('ok (shrimp-pool:do-reply waiting (tuple 'ok conn)))]
      (tuple 'reply 'ok 
             (maps:merge state
                         (map 'wait-list waitlist))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ACHTUNG
+;; I need this passthrough function to properly test it
+;; as meck doesn't allow to mock gen_server funs
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun do-reply 
+  [proc reply]
+  (gen_server:reply proc reply))
 
 (defun terminate [_reason _state]
   'ok)
