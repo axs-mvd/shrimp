@@ -216,7 +216,6 @@
                         'wait-list (cons waiting waitlist))
                    state)]
    (let
-     ;;[('ok (gen_server:reply waiting (tuple 'ok conn)))]
      [('ok (shrimp-pool:do-reply waiting (tuple 'ok conn)))]
      (tuple 'reply 'ok 
             (maps:merge state
