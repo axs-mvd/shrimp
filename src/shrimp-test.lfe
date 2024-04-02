@@ -1,5 +1,7 @@
 (defmodule shrimp-test
-  (export all))
+  (export (test-call-atom 0))
+  (export (kraken 1))
+  )
 
 (defun test_1 
   ([(map 'wait-list '())]
@@ -40,6 +42,12 @@
 (defun send-message (calling-pid msg)
   (let ((spawned-pid (spawn 'shrimp-test 'print-result ())))
     (! spawned-pid (tuple calling-pid msg))))
+
+(defun kraken [x] x)
+
+(defun test-call-atom []
+  (erlang:apply (MODULE) (erlang:list_to_atom "kraken") (list 'pepe)))
+
 
 ;(defun test
 ;  (['#M(wait-list '())]
