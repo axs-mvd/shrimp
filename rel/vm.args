@@ -1,0 +1,5 @@
+-name shrimp@127.0.0.1
+-kernel inetrc '"etc/inetrc"'
+-sname shrimp
+-setcookie shrimp
+-heart
