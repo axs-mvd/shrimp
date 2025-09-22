@@ -55,9 +55,9 @@ init([Host, Port]) ->
   logger:log(info, "waiting for gun"),
   MonitorRef = monitor(process, ConnPid),
   {ok, command, #{host => Host,
-                          port => Port,
-                          monitor_ref => MonitorRef,
-                          conn => ConnPid}}.
+                  port => Port,
+                  monitor_ref => MonitorRef,
+                  conn => ConnPid}}.
 command({call, CallerPid},
         {request, #{method := post,
                     url := Url,
@@ -66,7 +66,9 @@ command({call, CallerPid},
         #{conn := ConnPid} = State) ->
   _StreamRef = gun:post(ConnPid, Url, Headers, Body),
   {next_state, receiving, State#{caller => CallerPid}};
-command({call, CallerPid}, {request, Request}, #{conn := ConnPid} = State) ->
+command({call, CallerPid}, 
+        {request, Request}, 
+        #{conn := ConnPid} = State) ->
   _StreamRef = fire(ConnPid, Request),
   {next_state, receiving, State#{caller => CallerPid}};
 command(info,
@@ -92,14 +94,12 @@ fire(ConnPid,
 fire(ConnPid,
      #{method := _Method,
        url := _Path,
-       body := _Body} =
-       Req) ->
+       body := _Body} = Req) ->
   fire(ConnPid, Req#{headers => []});
 fire(ConnPid,
      #{method := _Method,
        headers := _Headers,
-       url := _Path} =
-       Req) ->
+       url := _Path} = Req) ->
   fire(ConnPid, Req#{body => <<"">>});
 fire(ConnPid, #{method := _Method, url := _Path} = Req) ->
   fire(ConnPid, Req#{headers => [], body => <<"">>}).
