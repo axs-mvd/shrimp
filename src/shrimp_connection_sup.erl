@@ -3,6 +3,7 @@
 -behaviour(supervisor).
 -export([start_link/0, init/1]).
 -export([add_connection/3]).
+-export([remove_connection/1]).
 
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -19,4 +20,7 @@ add_connection(Id, Host, Port) ->
                 restart => permanent,
                 shutdown => 5000},
   supervisor:start_child(?MODULE, ChildSpec).
+
+remove_connection(Id) ->
+  supervisor:delete_child(?MODULE, Id).
 

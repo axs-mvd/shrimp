@@ -2,25 +2,26 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, event/2]).
+-export([start/2, start/3]).
+-export([stop/1]).
+-export([start_link/3]).
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
 -export([command/3, receiving/3]).
 -export([request/2]).
--export([start/2]).
 
 -define(SERVER, ?MODULE).
 
 start(Host, Port) ->
-  start_link(Host, Port).
+  start_link(none, Host, Port).
 
-start_link(Host, Port) ->
-  gen_statem:start_link({local, ?SERVER}, ?MODULE, [Host, Port], []).
+start(Pool, Host, Port) ->
+  start_link(Pool, Host, Port).
+
+start_link(Pool, Host, Port) ->
+  gen_statem:start_link({local, ?SERVER}, ?MODULE, [Pool, Host, Port], []).
 
 stop(Pid) ->
   gen_statem:stop(Pid).
-
-event(Pid, Event) ->
-  gen_statem:cast(Pid, Event).
 
 request(Pid, Req) ->
   gen_statem:call(Pid, {request, Req}).
@@ -28,15 +29,19 @@ request(Pid, Req) ->
 callback_mode() ->
   state_functions.
 
-init([Host, Port]) ->
+init([Pool, Host, Port]) ->
   logger:info("connecting to ~p:~p:", [Host, Port]),
   {ok, ConnPid} = gun:open(Host, Port),
   logger:info("waiting for gun"),
   MonitorRef = monitor(process, ConnPid),
+  notify_available(Pool),
   {ok, command, #{host => Host,
                   port => Port,
+                  pool => Pool,
                   monitor_ref => MonitorRef,
                   conn => ConnPid}}.
+
+
 command({call, CallerPid}, 
         {request, Request}, 
         #{conn := ConnPid} = State) ->
@@ -46,10 +51,12 @@ command(info,
         {'DOWN', MonitorRef, process, ConnPid, Reason},
         #{conn := ConnPid,
           monitor_ref := MonitorRef,
+          pool := Pool,
           caller := CallerPid}) ->
   logger:error("gun connection DOWN aborting: ~p", [Reason]),
   error_logger:error_msg(Reason),
   demonitor(MonitorRef, flush),
+  notify_death(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);
 command(info, Msg, Data) ->
@@ -93,8 +100,10 @@ receiving(info,
 receiving(info,
           {gun_response, ConnPid, _StreamRef, fin, Status, Headers},
           #{conn := ConnPid, 
+            pool := Pool,
             caller := CallerPid} = State) ->
   ok = gen_statem:reply(CallerPid, {ok, #{status => Status, headers => Headers}}),
+  notify_available(Pool),
   {next_state, command, State};
 receiving(info,
           {gun_data, ConnPid, _StreamRef, nofin, Data},
@@ -106,17 +115,21 @@ receiving(info,
           {gun_data, ConnPid, _StreamRef, fin, Data},
           #{conn := ConnPid,
             caller := CallerPid,
+            pool := Pool,
             response := #{data := PrevData} = Response} = State) ->
   CompletedData = add(PrevData, Data),
   gen_statem:reply(CallerPid, {ok, Response#{data => CompletedData}}),
+  notify_available(Pool),
   {next_state, command, maps:without([response], State)};
 receiving(info,
           {'DOWN', MonitorRef, process, ConnPid, Reason},
           #{conn := ConnPid,
             monitor_ref := MonitorRef,
+            pool := Pool,
             caller := CallerPid}) ->
   error_logger:error_msg(Reason),
   demonitor(MonitorRef, flush),
+  notify_death(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);
 receiving(info, Msg, Data) ->
@@ -136,3 +149,12 @@ terminate(_Reason, _State, #{conn := ConnPid, monitor_ref := MonRef}) ->
   gun:close(ConnPid),
   logger:info("~p terminating.", [self()]),
   ok.
+
+notify_available(none) -> ok;
+notify_available(Pool) ->
+  shrimp_pool:notify_available(Pool, self()).
+
+notify_death(none) -> ok;
+notify_death(Pool) ->
+  shrimp_pool:notify_death(Pool, self()).
+
