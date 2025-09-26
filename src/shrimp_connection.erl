@@ -34,7 +34,7 @@ init([Pool, Host, Port]) ->
   {ok, ConnPid} = gun:open(Host, Port),
   logger:info("waiting for gun"),
   MonitorRef = monitor(process, ConnPid),
-  notify_available(Pool),
+  notify_up(Pool),
   {ok, command, #{host => Host,
                   port => Port,
                   pool => Pool,
@@ -56,7 +56,7 @@ command(info,
   logger:error("gun connection DOWN aborting: ~p", [Reason]),
   error_logger:error_msg(Reason),
   demonitor(MonitorRef, flush),
-  notify_death(Pool),
+  notify_down(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);
 command(info, Msg, Data) ->
@@ -100,10 +100,8 @@ receiving(info,
 receiving(info,
           {gun_response, ConnPid, _StreamRef, fin, Status, Headers},
           #{conn := ConnPid, 
-            pool := Pool,
             caller := CallerPid} = State) ->
   ok = gen_statem:reply(CallerPid, {ok, #{status => Status, headers => Headers}}),
-  notify_available(Pool),
   {next_state, command, State};
 receiving(info,
           {gun_data, ConnPid, _StreamRef, nofin, Data},
@@ -115,11 +113,9 @@ receiving(info,
           {gun_data, ConnPid, _StreamRef, fin, Data},
           #{conn := ConnPid,
             caller := CallerPid,
-            pool := Pool,
             response := #{data := PrevData} = Response} = State) ->
   CompletedData = add(PrevData, Data),
   gen_statem:reply(CallerPid, {ok, Response#{data => CompletedData}}),
-  notify_available(Pool),
   {next_state, command, maps:without([response], State)};
 receiving(info,
           {'DOWN', MonitorRef, process, ConnPid, Reason},
@@ -129,7 +125,7 @@ receiving(info,
             caller := CallerPid}) ->
   error_logger:error_msg(Reason),
   demonitor(MonitorRef, flush),
-  notify_death(Pool),
+  notify_down(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);
 receiving(info, Msg, Data) ->
@@ -150,11 +146,11 @@ terminate(_Reason, _State, #{conn := ConnPid, monitor_ref := MonRef}) ->
   logger:info("~p terminating.", [self()]),
   ok.
 
-notify_available(none) -> ok;
-notify_available(Pool) ->
-  shrimp_pool:notify_available(Pool, self()).
+notify_up(none) -> ok;
+notify_up(Pool) ->
+  shrimp_pool:notify_up(Pool, self()).
 
-notify_death(none) -> ok;
-notify_death(Pool) ->
-  shrimp_pool:notify_death(Pool, self()).
+notify_down(none) -> ok;
+notify_down(Pool) ->
+  shrimp_pool:notify_down(Pool, self()).
 
