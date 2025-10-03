@@ -2,7 +2,7 @@
 
 -behaviour(supervisor).
 -export([start_link/0, init/1]).
--export([add_connection/3]).
+-export([add_connection/4]).
 -export([remove_connection/1]).
 
 start_link() ->
@@ -13,9 +13,9 @@ init(_Args) ->
   ChildSpecs = [], % Initially no children
   {ok, {SupFlags, ChildSpecs}}.
 
-add_connection(Id, Host, Port) ->
+add_connection(Id, PoolPid, Host, Port) ->
   ChildSpec = #{id => Id,
-                start => {shrimp_connection, start_link, [Host, Port]},
+                start => {shrimp_connection, start_link, [PoolPid, Host, Port]},
                 type => worker,
                 restart => permanent,
                 shutdown => 5000},

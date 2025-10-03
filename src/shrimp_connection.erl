@@ -9,8 +9,6 @@
 -export([command/3, receiving/3]).
 -export([request/2]).
 
--define(SERVER, ?MODULE).
-
 start(Host, Port) ->
   start_link(none, Host, Port).
 
@@ -18,7 +16,7 @@ start(Pool, Host, Port) ->
   start_link(Pool, Host, Port).
 
 start_link(Pool, Host, Port) ->
-  gen_statem:start_link({local, ?SERVER}, ?MODULE, [Pool, Host, Port], []).
+  gen_statem:start_link(?MODULE, [Pool, Host, Port], []).
 
 stop(Pid) ->
   gen_statem:stop(Pid).
