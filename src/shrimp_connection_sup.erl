@@ -22,5 +22,6 @@ add_connection(Id, PoolPid, Host, Port) ->
   supervisor:start_child(?MODULE, ChildSpec).
 
 remove_connection(Id) ->
+  supervisor:terminate_child(?MODULE, Id),
   supervisor:delete_child(?MODULE, Id).
 
