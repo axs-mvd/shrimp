@@ -11,17 +11,19 @@ init(Req0, State0) ->
 
   {ok, Body} = read_body(Req0),
 
-  FinalState = lists:foldl(fun(Function,  State)->
+  FinalState = lists:foldl(fun(Function, State)->
                                Function(State)
-                           end, #{req => Req0, 
-                                  body => Body}, funs()), 
+                            end, #{req => Req0, 
+                                  body => Body}, 
+                           funs()), 
+
   io:format("FinalState ~p~n", [FinalState]),
 
-  Req = cowboy_req:reply(200,
-                         #{<<"content-type">> => <<"text/plain">>},
-                          <<"Hello Pepe!">>,
-                         Req0),
-  {ok, Req, State0}.
+%  Req = cowboy_req:reply(200,
+%                         #{<<"content-type">> => <<"text/plain">>},
+%                          <<"Hello Pepe!">>,
+%                         Req0),
+  {ok, Req0, State0}.
 
 funs() ->
   [
@@ -41,7 +43,15 @@ router(Ctx) ->
 do(Ctx) ->
   Ctx.
 
-reply(Ctx) ->
+reply(#{req := Req,
+        reply := #{headers := Headers, 
+                   body := Body,
+                   status := Status}} = Ctx) ->
+  cowboy_req:reply(Status, Headers, Body, Req),
+  Ctx;
+
+reply(#{req := Req} = Ctx) ->
+  cowboy_req:reply(502, #{}, <<"Bad Gateway">>, Req),
   Ctx.
 
 read_body(Req) ->
@@ -52,8 +62,4 @@ read_body({more, Binary, Req}, CurrBinary) ->
 
 read_body({ok, Binary, _Req}, CurrBinary) ->
   {ok, <<CurrBinary/binary, Binary/binary>>}.
-
-
-
-
 
