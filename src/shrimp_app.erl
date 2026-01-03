@@ -6,7 +6,8 @@
 
 start(_Type, _Args) ->
   shrimp_listener:start(),
-
+  shrimp_connection_sup:start_link(),
+  shrimp_router:start(),
 	shrimp_sup:start_link().
 
 stop(_State) ->

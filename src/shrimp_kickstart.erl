@@ -8,6 +8,7 @@
 
 init(Req0, State0) ->
   logger:info("~p", [Req0]),
+  logger:info("~p", [State0]),
 
   {ok, Body} = read_body(Req0),
 
@@ -17,41 +18,46 @@ init(Req0, State0) ->
                                   body => Body}, 
                            funs()), 
 
-  io:format("FinalState ~p~n", [FinalState]),
+  logger:info("FinalState ~p", [FinalState]),
 
-%  Req = cowboy_req:reply(200,
-%                         #{<<"content-type">> => <<"text/plain">>},
-%                          <<"Hello Pepe!">>,
-%                         Req0),
   {ok, Req0, State0}.
 
-funs() ->
-  [
-    fun shrimp_kickstart:router/1,
-    fun shrimp_kickstart:do/1,
-    fun shrimp_kickstart:reply/1
-  ].
+funs() -> [fun shrimp_kickstart:router/1,
+           fun shrimp_kickstart:do/1,
+           fun shrimp_kickstart:reply/1].
 
-router(#{req := _Req} = Ctx) ->
-  Pool = none,
-  Ctx#{pool => Pool};
+router(#{req := Req} = Ctx) ->
+  {ok, PoolPid} = shrimp_router:route(Req),
+  Ctx#{pool => PoolPid};
 
 router(Ctx) -> 
   %@log here
   Ctx.
 
-do(Ctx) ->
-  Ctx.
+do(#{pool := PoolPid,
+     req := Req,
+     body := Body} = Ctx) ->
+  {ok, Conn} = shrimp_pool:acquire(PoolPid),
+  logger:info("acquired a connection ~p", [Conn]),
+  {ok, Resp} = shrimp_connection:request(Conn, 
+                                   #{method => cowboy_req:method(Req), 
+                                     url => cowboy_req:uri(Req),
+                                     body => Body,
+                                     headers => cowboy_req:headers(Req)}),
+  shrimp_pool:release(PoolPid, Conn),
+  Ctx#{reply => Resp}.
 
 reply(#{req := Req,
         reply := #{headers := Headers, 
-                   body := Body,
+                   data := Body,
                    status := Status}} = Ctx) ->
-  cowboy_req:reply(Status, Headers, Body, Req),
+  cowboy_req:reply(Status, lists:foldl(fun({Key, Value}, M) -> maps:put(Key, Value, M)
+                                       end, #{}, Headers), Body, Req),
   Ctx;
 
 reply(#{req := Req} = Ctx) ->
-  cowboy_req:reply(502, #{}, <<"Bad Gateway">>, Req),
+  logger:error("Didn't find a suitable response for that ~p", [Ctx]),
+  cowboy_req:reply(502, #{}, <<"Bad Gateway, urraca">>, Req),
   Ctx.
 
 read_body(Req) ->
