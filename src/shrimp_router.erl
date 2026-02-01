@@ -20,7 +20,7 @@ route(Req) ->
   gen_server:call(?MODULE, {route, Req}).
 
 init([]) ->
-  {ok, PoolPid} = shrimp_pool:start_link("example.org", 443, #{max => 2}), 
+  {ok, PoolPid} = shrimp_pool:start_link("localhost", 8000, #{max => 3}), 
   logger:info("connected to example.org crash test dummy"),
   {ok, #{pool => PoolPid}}.
 

@@ -13,6 +13,8 @@ ebin
 ebin/*.beam
 deps
 
+mock/venv
+
 # rebar 3
 .rebar3
 _build/
