@@ -1,0 +1,262 @@
+-module(shrimp_api_handler).
+
+-export([init/2]).
+
+init(Req0, State) ->
+  Method = cowboy_req:method(Req0),
+  Path = cowboy_req:path(Req0),
+  Req = route_request(Method, Path, Req0),
+  {ok, Req, State}.
+
+route_request(Method, Path, Req0) ->
+  case check_path(Path) of
+    backend ->
+      handle_backend(Method, Path, Req0);
+    rule ->
+      handle_rule(Method, Path, Req0);
+    doc when Method =:= <<"GET">> ->
+      serve_swagger_yaml(Req0);
+    _ ->
+      cowboy_req:reply(404, Req0)
+  end.
+
+check_path(Path) ->
+  case binary:match(Path, <<"/backend">>) of
+    nomatch ->
+      case binary:match(Path, <<"/rule">>) of
+        nomatch ->
+          case Path of
+            <<"/doc">> -> doc;
+            _ -> unknown
+          end;
+        _ -> rule
+      end;
+    _ -> backend
+  end.
+
+%% Swagger endpoint
+serve_swagger_yaml(Req) ->
+  case read_swagger_file() of
+    {ok, Content} ->
+      cowboy_req:reply(200, #{<<"content-type">> => <<"application/yaml">>}, Content, Req);
+    {error, _Reason} ->
+      cowboy_req:reply(500, Req)
+  end.
+
+read_swagger_file() ->
+  PrivDir = code:priv_dir(shrimp),
+  FilePath = filename:join(PrivDir, "swagger.yaml"),
+  file:read_file(FilePath).
+
+%% Backend endpoints
+handle_backend(Method, Path, Req0) ->
+  PathList = binary:split(Path, <<"/">>, [global]),
+  Name = case PathList of
+    [_, <<"backend">>] -> undefined;
+    [_, <<"backend">>, NameBin] -> NameBin;
+    _ -> undefined
+  end,
+  handle_backend_request(Method, Name, Req0).
+
+handle_backend_request(<<"GET">>, undefined, Req) ->
+  handle_list_backends(Req);
+handle_backend_request(<<"GET">>, Name, Req) ->
+  handle_get_backend(Req, Name);
+handle_backend_request(<<"POST">>, undefined, Req) ->
+  handle_create_backend(Req);
+handle_backend_request(<<"PUT">>, Name, Req) ->
+  handle_update_backend(Req, Name);
+handle_backend_request(<<"DELETE">>, Name, Req) ->
+  handle_delete_backend(Req, Name);
+handle_backend_request(_, _, Req) ->
+  cowboy_req:reply(405, Req).
+
+handle_list_backends(Req) ->
+  case shrimp_model:list_backends() of
+    {ok, Backends} ->
+      shrimp_api_utils:reply_json(Req, 200, Backends);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req, Status, Reason)
+  end.
+
+handle_get_backend(Req, Name) ->
+  case shrimp_model:get_backend(binary_to_list(Name)) of
+    {ok, Backend} ->
+      shrimp_api_utils:reply_json(Req, 200, Backend);
+    {error, not_found} ->
+      shrimp_api_utils:reply_error(Req, 404, not_found);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req, Status, Reason)
+  end.
+
+handle_create_backend(Req0) ->
+  {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  case decode_json(Body) of
+    {ok, Data} ->
+      Backend = prepare_backend(Data),
+      case shrimp_model:add_backend(Backend) of
+        {ok, _Name} ->
+          shrimp_api_utils:reply_json(Req1, 201, #{<<"status">> => <<"created">>});
+        {error, backend_already_exists} ->
+          shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
+        {error, Reason} ->
+          Status = shrimp_api_utils:error_to_status(Reason),
+          shrimp_api_utils:reply_error(Req1, Status, Reason)
+      end;
+    {error, _} ->
+      shrimp_api_utils:reply_error(Req1, 400, invalid_json)
+  end.
+
+handle_update_backend(Req0, Name) ->
+  {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  case decode_json(Body) of
+    {ok, Data} ->
+      Backend = prepare_backend(Data),
+      case shrimp_model:modify_backend(binary_to_list(Name), Backend) of
+        ok ->
+          shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
+        {error, backend_not_found} ->
+          shrimp_api_utils:reply_error(Req1, 404, backend_not_found);
+        {error, Reason} ->
+          Status = shrimp_api_utils:error_to_status(Reason),
+          shrimp_api_utils:reply_error(Req1, Status, Reason)
+      end;
+    {error, _} ->
+      shrimp_api_utils:reply_error(Req1, 400, invalid_json)
+  end.
+
+handle_delete_backend(Req0, Name) ->
+  case shrimp_model:remove_backend(binary_to_list(Name)) of
+    ok ->
+      shrimp_api_utils:reply_json(Req0, 200, #{<<"status">> => <<"ok">>});
+    {error, backend_not_found} ->
+      shrimp_api_utils:reply_error(Req0, 404, backend_not_found);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req0, Status, Reason)
+  end.
+
+prepare_backend(Data) ->
+  #{
+    name => binary_to_list(maps:get(<<"name">>, Data, <<>>)),
+    url => binary_to_list(maps:get(<<"url">>, Data, <<>>)),
+    pool_size => maps:get(<<"pool-size">>, Data, #{})
+  }.
+
+%% Rule endpoints
+handle_rule(Method, Path, Req0) ->
+  PathList = binary:split(Path, <<"/">>, [global]),
+  Name = case PathList of
+    [_, <<"rule">>] -> undefined;
+    [_, <<"rule">>, NameBin] -> NameBin;
+    _ -> undefined
+  end,
+  handle_rule_request(Method, Name, Req0).
+
+handle_rule_request(<<"GET">>, undefined, Req) ->
+  handle_list_rules(Req);
+handle_rule_request(<<"GET">>, Name, Req) ->
+  handle_get_rule(Req, Name);
+handle_rule_request(<<"POST">>, undefined, Req) ->
+  handle_create_rule(Req);
+handle_rule_request(<<"PUT">>, Name, Req) ->
+  handle_update_rule(Req, Name);
+handle_rule_request(<<"DELETE">>, Name, Req) ->
+  handle_delete_rule(Req, Name);
+handle_rule_request(_, _, Req) ->
+  cowboy_req:reply(405, Req).
+
+handle_list_rules(Req) ->
+  case shrimp_model:list_rules() of
+    {ok, Rules} ->
+      shrimp_api_utils:reply_json(Req, 200, Rules);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req, Status, Reason)
+  end.
+
+handle_get_rule(Req, Name) ->
+  case shrimp_model:get_rule(binary_to_list(Name)) of
+    {ok, Rule} ->
+      shrimp_api_utils:reply_json(Req, 200, Rule);
+    {error, not_found} ->
+      shrimp_api_utils:reply_error(Req, 404, not_found);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req, Status, Reason)
+  end.
+
+handle_create_rule(Req0) ->
+  {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  case decode_json(Body) of
+    {ok, Data} ->
+      Rule = prepare_rule(Data),
+      case shrimp_model:add_rule(Rule) of
+        {ok, _Name} ->
+          shrimp_api_utils:reply_json(Req1, 201, #{<<"status">> => <<"created">>});
+        {error, rule_already_exists} ->
+          shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
+        {error, Reason} ->
+          Status = shrimp_api_utils:error_to_status(Reason),
+          shrimp_api_utils:reply_error(Req1, Status, Reason)
+      end;
+    {error, _} ->
+      shrimp_api_utils:reply_error(Req1, 400, invalid_json)
+  end.
+
+handle_update_rule(Req0, Name) ->
+  {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  case decode_json(Body) of
+    {ok, Data} ->
+      Rule = prepare_rule(Data),
+      case shrimp_model:modify_rule(binary_to_list(Name), Rule) of
+        ok ->
+          shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
+        {error, rule_not_found} ->
+          shrimp_api_utils:reply_error(Req1, 404, rule_not_found);
+        {error, Reason} ->
+          Status = shrimp_api_utils:error_to_status(Reason),
+          shrimp_api_utils:reply_error(Req1, Status, Reason)
+      end;
+    {error, _} ->
+      shrimp_api_utils:reply_error(Req1, 400, invalid_json)
+  end.
+
+handle_delete_rule(Req0, Name) ->
+  case shrimp_model:remove_rule(binary_to_list(Name)) of
+    ok ->
+      shrimp_api_utils:reply_json(Req0, 200, #{<<"status">> => <<"ok">>});
+    {error, rule_not_found} ->
+      shrimp_api_utils:reply_error(Req0, 404, rule_not_found);
+    {error, Reason} ->
+      Status = shrimp_api_utils:error_to_status(Reason),
+      shrimp_api_utils:reply_error(Req0, Status, Reason)
+  end.
+
+prepare_rule(Data) ->
+  #{
+    name => binary_to_list(maps:get(<<"name">>, Data, <<>>)),
+    'in' => binary_to_list(maps:get(<<"in">>, Data, <<>>)),
+    out => prepare_out(maps:get(<<"out">>, Data, #{})),
+    middlewares => maps:get(<<"middlewares">>, Data, [])
+  }.
+
+prepare_out(OutData) ->
+  #{
+    backends => [binary_to_list(B) || B <- maps:get(<<"backends">>, OutData, [])],
+    dispatcher => case maps:get(<<"dispatcher">>, OutData) of
+                    <<"round_robin">> -> round_robin;
+                    Atom when is_atom(Atom) -> Atom;
+                    _ -> round_robin
+                  end
+  }.
+
+%% Utilities
+decode_json(Body) ->
+  try
+    {ok, jsx:decode(Body, [return_maps])}
+  catch
+    _:_ -> {error, invalid_json}
+  end.

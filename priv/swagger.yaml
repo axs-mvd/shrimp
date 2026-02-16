@@ -1,0 +1,254 @@
+swagger: '2.0'
+info:
+  title: Shrimp API
+  description: Shrimp Reverse Proxy API
+  version: 0.1.0
+
+host: localhost:8000
+basePath: /api
+schemes:
+  - http
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+
+paths:
+  /backend:
+    get:
+      summary: List all backends
+      operationId: listBackends
+      responses:
+        200:
+          description: List of backends
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Backend'
+        500:
+          description: Internal server error
+    post:
+      summary: Create or update a backend
+      operationId: createBackend
+      parameters:
+        - name: backend
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/Backend'
+      responses:
+        201:
+          description: Backend created
+        200:
+          description: Backend already exists
+        400:
+          description: Invalid data
+        500:
+          description: Internal server error
+
+  /backend/{name}:
+    get:
+      summary: Get a backend by name
+      operationId: getBackend
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: Backend details
+          schema:
+            $ref: '#/definitions/Backend'
+        404:
+          description: Backend not found
+        500:
+          description: Internal server error
+    put:
+      summary: Update a backend
+      operationId: updateBackend
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+        - name: backend
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/Backend'
+      responses:
+        200:
+          description: Backend updated
+        404:
+          description: Backend not found
+        400:
+          description: Invalid data
+        500:
+          description: Internal server error
+    delete:
+      summary: Delete a backend
+      operationId: deleteBackend
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: Backend deleted
+        404:
+          description: Backend not found
+        500:
+          description: Internal server error
+
+  /rule:
+    get:
+      summary: List all rules
+      operationId: listRules
+      responses:
+        200:
+          description: List of rules
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Rule'
+        500:
+          description: Internal server error
+    post:
+      summary: Create or update a rule
+      operationId: createRule
+      parameters:
+        - name: rule
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/Rule'
+      responses:
+        201:
+          description: Rule created
+        200:
+          description: Rule already exists
+        400:
+          description: Invalid data
+        500:
+          description: Internal server error
+
+  /rule/{name}:
+    get:
+      summary: Get a rule by name
+      operationId: getRule
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: Rule details
+          schema:
+            $ref: '#/definitions/Rule'
+        404:
+          description: Rule not found
+        500:
+          description: Internal server error
+    put:
+      summary: Update a rule
+      operationId: updateRule
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+        - name: rule
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/Rule'
+      responses:
+        200:
+          description: Rule updated
+        404:
+          description: Rule not found
+        400:
+          description: Invalid data
+        500:
+          description: Internal server error
+    delete:
+      summary: Delete a rule
+      operationId: deleteRule
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: Rule deleted
+        404:
+          description: Rule not found
+        500:
+          description: Internal server error
+
+definitions:
+  Backend:
+    type: object
+    required:
+      - name
+      - url
+      - pool-size
+    properties:
+      name:
+        type: string
+        description: Backend name
+      url:
+        type: string
+        description: Backend URL
+      pool-size:
+        type: object
+        required:
+          - min
+          - max
+        properties:
+          min:
+            type: integer
+            description: Minimum pool size
+          max:
+            type: integer
+            description: Maximum pool size
+
+  Rule:
+    type: object
+    required:
+      - name
+      - in
+      - out
+    properties:
+      name:
+        type: string
+        description: Rule name
+      in:
+        type: string
+        description: Input path pattern
+      out:
+        type: object
+        required:
+          - backends
+          - dispatcher
+        properties:
+          backends:
+            type: array
+            items:
+              type: string
+            description: List of backend names
+          dispatcher:
+            type: string
+            enum:
+              - round_robin
+            description: Dispatcher strategy
+      middlewares:
+        type: array
+        items:
+          type: object
+        description: Middlewares configuration
