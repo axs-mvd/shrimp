@@ -11,6 +11,6 @@ start() ->
     ]}
   ]),
   R = {ok, _} = cowboy:start_clear(shrimp_api_listener,
-                                   [{port, 8000}],
+                                   [{port, list_to_integer(os:getenv("SHRIMP_API_PORT", "8000"))}],
                                    #{env => #{dispatch => Dispatch}}),
   R.
