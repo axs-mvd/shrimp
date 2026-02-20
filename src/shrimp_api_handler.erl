@@ -21,9 +21,9 @@ route_request(Method, Path, Req0) ->
   end.
 
 check_path(Path) ->
-  case binary:match(Path, <<"/backend">>) of
+  case binary:match(Path, <<"/api/backend">>) of
     nomatch ->
-      case binary:match(Path, <<"/rule">>) of
+      case binary:match(Path, <<"/api/rule">>) of
         nomatch ->
           case Path of
             <<"/doc">> -> doc;
@@ -52,8 +52,8 @@ read_swagger_file() ->
 handle_backend(Method, Path, Req0) ->
   PathList = binary:split(Path, <<"/">>, [global]),
   Name = case PathList of
-    [_, <<"backend">>] -> undefined;
-    [_, <<"backend">>, NameBin] -> NameBin;
+    [_, <<"api">>, <<"backend">>] -> undefined;
+    [_, <<"api">>, <<"backend">>, NameBin] -> NameBin;
     _ -> undefined
   end,
   handle_backend_request(Method, Name, Req0).
@@ -74,7 +74,8 @@ handle_backend_request(_, _, Req) ->
 handle_list_backends(Req) ->
   case shrimp_model:list_backends() of
     {ok, Backends} ->
-      shrimp_api_utils:reply_json(Req, 200, Backends);
+      CleanBackends = [sanitize_backend(B) || B <- Backends],
+      shrimp_api_utils:reply_json(Req, 200, CleanBackends);
     {error, Reason} ->
       Status = shrimp_api_utils:error_to_status(Reason),
       shrimp_api_utils:reply_error(Req, Status, Reason)
@@ -83,7 +84,8 @@ handle_list_backends(Req) ->
 handle_get_backend(Req, Name) ->
   case shrimp_model:get_backend(binary_to_list(Name)) of
     {ok, Backend} ->
-      shrimp_api_utils:reply_json(Req, 200, Backend);
+      CleanBackend = sanitize_backend(Backend),
+      shrimp_api_utils:reply_json(Req, 200, CleanBackend);
     {error, not_found} ->
       shrimp_api_utils:reply_error(Req, 404, not_found);
     {error, Reason} ->
@@ -93,6 +95,7 @@ handle_get_backend(Req, Name) ->
 
 handle_create_backend(Req0) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  %@TODO instead of only decode the body, create a validator of the incoming data
   case decode_json(Body) of
     {ok, Data} ->
       Backend = prepare_backend(Data),
@@ -111,6 +114,7 @@ handle_create_backend(Req0) ->
 
 handle_update_backend(Req0, Name) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req0),
+  %@TODO instead of only decode the body, create a validator of the incoming data
   case decode_json(Body) of
     {ok, Data} ->
       Backend = prepare_backend(Data),
@@ -139,18 +143,23 @@ handle_delete_backend(Req0, Name) ->
   end.
 
 prepare_backend(Data) ->
+  PoolSizeData = maps:get(<<"pool-size">>, Data, #{}),
+  PoolSize = #{
+    min => maps:get(<<"min">>, PoolSizeData, 1),
+    max => maps:get(<<"max">>, PoolSizeData, 10)
+  },
   #{
     name => binary_to_list(maps:get(<<"name">>, Data, <<>>)),
     url => binary_to_list(maps:get(<<"url">>, Data, <<>>)),
-    pool_size => maps:get(<<"pool-size">>, Data, #{})
+    pool_size => PoolSize
   }.
 
 %% Rule endpoints
 handle_rule(Method, Path, Req0) ->
   PathList = binary:split(Path, <<"/">>, [global]),
   Name = case PathList of
-    [_, <<"rule">>] -> undefined;
-    [_, <<"rule">>, NameBin] -> NameBin;
+    [_, <<"api">>, <<"rule">>] -> undefined;
+    [_, <<"api">>, <<"rule">>, NameBin] -> NameBin;
     _ -> undefined
   end,
   handle_rule_request(Method, Name, Req0).
@@ -171,7 +180,8 @@ handle_rule_request(_, _, Req) ->
 handle_list_rules(Req) ->
   case shrimp_model:list_rules() of
     {ok, Rules} ->
-      shrimp_api_utils:reply_json(Req, 200, Rules);
+      CleanRules = [sanitize_rule(R) || R <- Rules],
+      shrimp_api_utils:reply_json(Req, 200, CleanRules);
     {error, Reason} ->
       Status = shrimp_api_utils:error_to_status(Reason),
       shrimp_api_utils:reply_error(Req, Status, Reason)
@@ -180,7 +190,8 @@ handle_list_rules(Req) ->
 handle_get_rule(Req, Name) ->
   case shrimp_model:get_rule(binary_to_list(Name)) of
     {ok, Rule} ->
-      shrimp_api_utils:reply_json(Req, 200, Rule);
+      CleanRule = sanitize_rule(Rule),
+      shrimp_api_utils:reply_json(Req, 200, CleanRule);
     {error, not_found} ->
       shrimp_api_utils:reply_error(Req, 404, not_found);
     {error, Reason} ->
@@ -244,13 +255,15 @@ prepare_rule(Data) ->
   }.
 
 prepare_out(OutData) ->
+  DispatcherBin = maps:get(<<"dispatcher">>, OutData, <<"round_robin">>),
+  Dispatcher = case DispatcherBin of
+                 <<"round_robin">> -> round_robin;
+                 Atom when is_atom(Atom) -> Atom;
+                 _ -> round_robin
+               end,
   #{
     backends => [binary_to_list(B) || B <- maps:get(<<"backends">>, OutData, [])],
-    dispatcher => case maps:get(<<"dispatcher">>, OutData) of
-                    <<"round_robin">> -> round_robin;
-                    Atom when is_atom(Atom) -> Atom;
-                    _ -> round_robin
-                  end
+    dispatcher => Dispatcher
   }.
 
 %% Utilities
@@ -260,3 +273,29 @@ decode_json(Body) ->
   catch
     _:_ -> {error, invalid_json}
   end.
+
+%% Sanitize backends for JSON response (remove pid field and convert to binary keys)
+sanitize_backend(Backend) ->
+  BackendWithoutPid = maps:without([pid], Backend),
+  PoolSize = maps:get(pool_size, BackendWithoutPid),
+  #{
+    <<"name">> => list_to_binary(maps:get(name, BackendWithoutPid)),
+    <<"url">> => list_to_binary(maps:get(url, BackendWithoutPid)),
+    <<"pool-size">> => #{
+      <<"min">> => maps:get(min, PoolSize),
+      <<"max">> => maps:get(max, PoolSize)
+    }
+  }.
+
+%% Sanitize rules for JSON response (convert to binary keys)
+sanitize_rule(Rule) ->
+  OutData = maps:get(out, Rule),
+  #{
+    <<"name">> => list_to_binary(maps:get(name, Rule)),
+    <<"in">> => list_to_binary(maps:get('in', Rule)),
+    <<"out">> => #{
+      <<"backends">> => [list_to_binary(B) || B <- maps:get(backends, OutData)],
+      <<"dispatcher">> => atom_to_binary(maps:get(dispatcher, OutData), utf8)
+    },
+    <<"middlewares">> => maps:get(middlewares, Rule, [])
+  }.

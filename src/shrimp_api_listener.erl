@@ -4,8 +4,8 @@
 start() ->
   Dispatch = cowboy_router:compile([
     {'_', [
-      {"/backend/[...]", shrimp_api_handler, []},
-      {"/rule/[...]", shrimp_api_handler, []},
+      {"/api/backend/[...]", shrimp_api_handler, []},
+      {"/api/rule/[...]", shrimp_api_handler, []},
       {"/doc/[...]", shrimp_api_handler, []},
       {"/doc", shrimp_api_handler, []}
     ]}

@@ -33,7 +33,8 @@
 
 -type backend() :: #{name := string(),
                      url := string(),
-                     pool_size := #{min := non_neg_integer(), max := non_neg_integer()}}.
+                     pool_size := #{min := non_neg_integer(), max := non_neg_integer()},
+                     pid => pid()}.
 
 -type rule() :: #{name := string(),
                   'in' := string(),
@@ -123,9 +124,16 @@ handle_call({add_backend, Backend}, _From, State = #{backends := Backends}) ->
         true ->
           {reply, {error, backend_already_exists}, State};
         false ->
-          NewState = State#{backends := maps:put(Name, Backend, Backends)},
-          notify_callbacks(on_backend_added, {Name, Backend}, State),
-          {reply, {ok, Name}, NewState}
+          case start_pool(Backend) of
+            {ok, BackendWithPid} ->
+              NewState = State#{backends := maps:put(Name, BackendWithPid, Backends)},
+              notify_callbacks(on_backend_added, {Name, BackendWithPid}, State),
+              shrimp_persistence:save_config(NewState),
+              {reply, {ok, Name}, NewState};
+            {error, Reason} ->
+              logger:warning("Failed to start pool for backend ~p: ~p", [Name, Reason]),
+              {reply, {error, Reason}, State}
+          end
       end;
     {error, Reason} ->
       {reply, {error, Reason}, State}
@@ -142,9 +150,22 @@ handle_call({modify_backend, Name, Backend}, _From, State = #{backends := Backen
             false ->
               {reply, {error, backend_not_found}, State};
             true ->
-              NewState = State#{backends := maps:put(Name, Backend, Backends)},
-              notify_callbacks(on_backend_modified, {Name, Backend}, State),
-              {reply, ok, NewState}
+              OldBackend = maps:get(Name, Backends),
+              %% Stop old pool if it exists
+              case maps:find(pid, OldBackend) of
+                {ok, _OldPid} -> stop_pool(Name, _OldPid);
+                error -> ok
+              end,
+              %% Start new pool
+              case start_pool(Backend) of
+                {ok, BackendWithPid} ->
+                  NewState = State#{backends := maps:put(Name, BackendWithPid, Backends)},
+                  notify_callbacks(on_backend_modified, {Name, BackendWithPid}, State),
+                  shrimp_persistence:save_config(NewState),
+                  {reply, ok, NewState};
+                {error, Reason} ->
+                  {reply, {error, Reason}, State}
+              end
           end
       end;
     {error, Reason} ->
@@ -161,8 +182,14 @@ handle_call({remove_backend, Name}, _From, State = #{backends := Backends, rules
           {reply, {error, backend_in_use}, State};
         false ->
           Backend = maps:get(Name, Backends),
+          %% Stop the pool
+          case maps:find(pid, Backend) of
+            {ok, Pid} -> stop_pool(Name, Pid);
+            error -> ok
+          end,
           NewState = State#{backends := maps:remove(Name, Backends)},
           notify_callbacks(on_backend_removed, {Name, Backend}, State),
+          shrimp_persistence:save_config(NewState),
           {reply, ok, NewState}
       end
   end;
@@ -188,6 +215,7 @@ handle_call({add_rule, Rule}, _From, State = #{rules := Rules} = FullState) ->
         false ->
           NewState = State#{rules := maps:put(RuleName, Rule, Rules)},
           notify_callbacks(on_rule_added, {RuleName, Rule}, State),
+          shrimp_persistence:save_config(NewState),
           {reply, {ok, RuleName}, NewState}
       end;
     {error, Reason} ->
@@ -207,6 +235,7 @@ handle_call({modify_rule, RuleName, Rule}, _From, State = #{rules := Rules} = Fu
             true ->
               NewState = State#{rules := maps:put(RuleName, Rule, Rules)},
               notify_callbacks(on_rule_modified, {RuleName, Rule}, State),
+              shrimp_persistence:save_config(NewState),
               {reply, ok, NewState}
           end
       end;
@@ -222,6 +251,7 @@ handle_call({remove_rule, RuleName}, _From, State = #{rules := Rules}) ->
       Rule = maps:get(RuleName, Rules),
       NewState = State#{rules := maps:remove(RuleName, Rules)},
       notify_callbacks(on_rule_removed, {RuleName, Rule}, State),
+      shrimp_persistence:save_config(NewState),
       {reply, ok, NewState}
   end;
 
@@ -263,7 +293,14 @@ handle_cast(_Msg, State) ->
 handle_info(_Info, State) ->
   {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #{backends := Backends}) ->
+  %% Stop all pools
+  maps:foreach(fun(Name, Backend) ->
+                 case maps:find(pid, Backend) of
+                   {ok, Pid} -> stop_pool(Name, Pid);
+                   error -> ok
+                 end
+               end, Backends),
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -345,6 +382,47 @@ backend_in_use(BackendName, Rules) ->
   maps:fold(fun(_RuleId, #{out := #{backends := Backends}}, Acc) ->
                 Acc orelse lists:member(BackendName, Backends)
             end, false, Rules).
+
+%% Start a pool for a backend using the pool supervisor
+-spec start_pool(backend()) -> {ok, backend()} | {error, term()}.
+start_pool(Backend = #{name := Name, url := Url, pool_size := PoolSize}) ->
+  case parse_url(Url) of
+    {ok, Host, Port} ->
+      PoolId = list_to_atom("pool_" ++ Name),
+      case shrimp_pool_sup:add_pool(PoolId, Host, Port, PoolSize) of
+        {ok, PoolPid} ->
+          {ok, Backend#{pid => PoolPid}};
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% Stop a pool
+-spec stop_pool(atom(), pid()) -> ok.
+stop_pool(BackendName, _Pid) ->
+  PoolId = list_to_atom("pool_" ++ BackendName),
+  case shrimp_pool_sup:remove_pool(PoolId) of
+    ok -> ok;
+    {error, not_found} -> ok;
+    {error, Reason} ->
+      logger:warning("Failed to stop pool ~p: ~p", [PoolId, Reason]),
+      ok
+  end.
+
+%% Parse URL to extract host and port
+-spec parse_url(string()) -> {ok, string(), non_neg_integer()} | {error, term()}.
+parse_url(Url) ->
+  UrlBin = list_to_binary(Url),
+  case uri_string:parse(UrlBin) of
+    #{host := Host, port := Port} ->
+      {ok, binary_to_list(Host), Port};
+    #{host := Host} ->
+      {ok, binary_to_list(Host), 80};
+    _ ->
+      {error, invalid_url}
+  end.
 
 -spec notify_callbacks(atom(), term(), state()) -> ok.
 notify_callbacks(Event, Data, #{callbacks := Callbacks}) ->

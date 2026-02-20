@@ -12,7 +12,7 @@
 -define(MAX_ID, 1000000).
 
 start_link(Id, Host, Port, #{max := _Max} = PoolSpec) ->
-  gen_server:start_link(Id, ?MODULE, [Host, Port, PoolSpec], []).
+  gen_server:start_link({local, Id}, ?MODULE, [Host, Port, PoolSpec], []).
 
 start_link(Host, Port, #{max := _Max} = PoolSpec) ->
   gen_server:start_link(?MODULE, [Host, Port, PoolSpec], []).
