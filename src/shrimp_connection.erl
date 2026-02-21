@@ -58,7 +58,7 @@ command(info,
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);
 command(info, Msg, Data) ->
-  logger:info("Got raw message in command: ~p", [Msg]),
+  logger:debug("Got raw message in command: ~p", [Msg]),
   {keep_state, Data}.
 
 fire(ConnPid,

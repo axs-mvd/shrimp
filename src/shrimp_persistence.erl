@@ -41,7 +41,4 @@ save_config(#{backends := Backends, rules := Rules}) ->
 
 %% Get config file path from environment variable or use default
 get_config_file() ->
-  case os:getenv("SHRIMP_CONFIG_FILE") of
-    false -> "./config.json";
-    Path -> Path
-  end.
+  os:getenv("SHRIMP_CONFIG_FILE", "./config.json").
