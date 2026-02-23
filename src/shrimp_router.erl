@@ -20,13 +20,12 @@ route(Req) ->
   gen_server:call(?MODULE, {route, Req}).
 
 init([]) ->
-  {ok, PoolPid} = shrimp_pool:start_link("localhost", 8000, #{max => 1}), 
-  logger:info("connected to example.org crash test dummy"),
-  {ok, #{pool => PoolPid}}.
+  {ok, #{}}.
 
-handle_call({route, Req}, _From, #{pool := PoolPid} = State) ->
+handle_call({route, Req}, _From, State) ->
   logger:info("routing ~p", [Req]),
-  {reply, {ok, PoolPid}, State}.
+  {ok, Rules} = shrimp_model:list_rules(),
+  {reply, pick_backend(route(Req, Rules)), State}.
 
 handle_cast(_, _) ->
   error(not_implemented).
@@ -37,4 +36,39 @@ terminate(_, _) ->
 code_change(_, _, _) ->
   error(not_implemented).
 
+route(_, []) ->
+  no_match;
+
+route(Req, [#{name := Name,
+              backends := _,
+              'in' := In} = Rule | Rules]) ->
+  case match(cowboy_req:path(Req), Rule) of
+    match -> 
+      logger:info("match on ~s url: ~p in rule ~p", [Name, cowboy_req:path(Req), In]),
+      Rule;
+    no_match ->
+      logger:info("no match on ~s url: ~p in rule ~p", [Name, cowboy_req:path(Req), In]),
+      route(Req, Rules)
+  end.
+
+match(Path, #{'in' := In}) ->
+  K = size(In),
+  case Path of
+    <<In:K/binary, _/binary>> -> match;
+    _ -> no_match 
+  end.
+
+strategy(#{dispatcher := _}) ->
+  random.
+
+pick_backend(Rule) ->
+  pick_backend(strategy(Rule), Rule).
+
+pick_backend(random, #{backends := Backends}) -> 
+  #{pid := PoolPid} = lists:nth(rand:uniform(length(Backends)), Backends),
+  {ok, PoolPid};
+
+pick_backend(Strategy, Backends) -> 
+  logger:error("illegal strategy ~p while choosing from ~p", [Strategy, Backends]),
+  none.
 
