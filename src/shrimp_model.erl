@@ -3,8 +3,7 @@
 -behaviour(gen_server).
 
 %% Public API
--export([
-         start_link/0,
+-export([start_link/0,
          stop/0,
 
          %% Backend operations
@@ -23,7 +22,10 @@
 
          %% Callback management
          register_callback/2,
-         unregister_callback/2]).
+         unregister_callback/2,
+
+         validate_backend/1,
+         validate_rule/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, 
@@ -219,6 +221,7 @@ handle_call({add_rule, Rule}, _From, State = #{rules := Rules} = FullState) ->
           {reply, {ok, RuleName}, NewState}
       end;
     {error, Reason} ->
+      logger:error("add rule didnt validate ~p", [Reason]),
       {reply, {error, Reason}, State}
   end;
 
@@ -240,6 +243,7 @@ handle_call({modify_rule, RuleName, Rule}, _From, State = #{rules := Rules} = Fu
           end
       end;
     {error, Reason} ->
+      logger:error("modify rule didnt validate ~p", [Reason]),
       {reply, {error, Reason}, State}
   end;
 
@@ -353,7 +357,7 @@ validate_rule(Rule, State) ->
     #{name := _RuleName} ->
       {error, missing_in_path};
     _ ->
-      {error, missing_rule_name}
+      {error, missing_name}
   end.
 
 -spec validate_out(term(), state()) -> ok | {error, term()}.
@@ -372,7 +376,7 @@ check_backends_exist([], _State) ->
 check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
   case maps:is_key(Name, Backends) of
     false ->
-      {error, {backend_not_found, Name}};
+      {error, backend_not_found};
     true ->
       check_backends_exist(Rest, State)
   end.

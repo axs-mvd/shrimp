@@ -148,11 +148,16 @@ prepare_backend(Data) ->
     min => maps:get(<<"min">>, PoolSizeData, 1),
     max => maps:get(<<"max">>, PoolSizeData, 10)
   },
-  #{
-    name => binary_to_list(maps:get(<<"name">>, Data, <<>>)),
-    url => binary_to_list(maps:get(<<"url">>, Data, <<>>)),
-    pool_size => PoolSize
-  }.
+  maps:filter(fun(_, none) -> false; 
+                 (_, _) -> true 
+              end, #{name => to_list(maps:get(<<"name">>, Data, none)),
+                     url => to_list(maps:get(<<"url">>, Data, none)),
+                     pool_size => PoolSize}).
+
+to_list(none) -> none;
+to_list(B) when is_binary(B) -> binary_to_list(B);
+to_list(B) when is_list(B) -> B;
+to_list(_) -> error("unsupported").
 
 %% Rule endpoints
 handle_rule(Method, Path, Req0) ->
@@ -247,12 +252,13 @@ handle_delete_rule(Req0, Name) ->
   end.
 
 prepare_rule(Data) ->
-  #{
-    name => binary_to_list(maps:get(<<"name">>, Data, <<>>)),
-    'in' => binary_to_list(maps:get(<<"in">>, Data, <<>>)),
-    out => prepare_out(maps:get(<<"out">>, Data, #{})),
-    middlewares => maps:get(<<"middlewares">>, Data, [])
-  }.
+  maps:filter(fun(_, none) -> false; 
+                 (_, _) -> true 
+              end, 
+              #{name => to_list(maps:get(<<"name">>, Data, none)),
+                'in' => to_list(maps:get(<<"in">>, Data, none)),
+                out => prepare_out(maps:get(<<"out">>, Data, #{})),
+                middlewares => maps:get(<<"middlewares">>, Data, [])}).
 
 prepare_out(OutData) ->
   DispatcherBin = maps:get(<<"dispatcher">>, OutData, <<"round_robin">>),
