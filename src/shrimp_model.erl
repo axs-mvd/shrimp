@@ -376,7 +376,7 @@ check_backends_exist([], _State) ->
 check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
   case maps:is_key(Name, Backends) of
     false ->
-      {error, backend_not_found};
+      {error, referrenced_backend_not_found};
     true ->
       check_backends_exist(Rest, State)
   end.

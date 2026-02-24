@@ -26,4 +26,5 @@ error_to_status(missing_dispatcher) -> 400;
 error_to_status(missing_backends_in_out) -> 400;
 error_to_status(rule_name_mismatch) -> 400;
 error_to_status(backend_name_mismatch) -> 400;
+error_to_status(referrenced_backend_not_found) -> 400;
 error_to_status(_) -> 500.
