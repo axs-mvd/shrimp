@@ -9,7 +9,7 @@ load_config() ->
   case file:read_file(ConfigFile) of
     {ok, Binary} ->
       try
-        Json = jsx:decode(Binary, [return_maps]),
+        Json = jsx:decode(Binary, [return_maps, binary]),
         {ok, Json}
       catch
         _:_ -> {error, invalid_json}

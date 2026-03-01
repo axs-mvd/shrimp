@@ -62,15 +62,15 @@ add_backend(Backend) when is_map(Backend) ->
   gen_server:call(?SERVER, {add_backend, Backend}).
 
 -spec modify_backend(string(), backend()) -> ok | {error, term()}.
-modify_backend(Name, Backend) when is_list(Name), is_map(Backend) ->
+modify_backend(Name, Backend) when is_binary(Name), is_map(Backend) ->
   gen_server:call(?SERVER, {modify_backend, Name, Backend}).
 
 -spec remove_backend(string()) -> ok | {error, term()}.
-remove_backend(Name) when is_list(Name) ->
+remove_backend(Name) when is_binary(Name) ->
   gen_server:call(?SERVER, {remove_backend, Name}).
 
 -spec get_backend(string()) -> {ok, backend()} | {error, not_found}.
-get_backend(Name) when is_list(Name) ->
+get_backend(Name) when is_binary(Name) ->
   gen_server:call(?SERVER, {get_backend, Name}).
 
 -spec list_backends() -> {ok, [backend()]}.
@@ -84,15 +84,15 @@ add_rule(Rule) when is_map(Rule) ->
   gen_server:call(?SERVER, {add_rule, Rule}).
 
 -spec modify_rule(string(), rule()) -> ok | {error, term()}.
-modify_rule(RuleId, Rule) when is_list(RuleId), is_map(Rule) ->
+modify_rule(RuleId, Rule) when is_binary(RuleId), is_map(Rule) ->
   gen_server:call(?SERVER, {modify_rule, RuleId, Rule}).
 
 -spec remove_rule(string()) -> ok | {error, term()}.
-remove_rule(RuleId) when is_list(RuleId) ->
+remove_rule(RuleId) when is_binary(RuleId) ->
   gen_server:call(?SERVER, {remove_rule, RuleId}).
 
 -spec get_rule(string()) -> {ok, rule()} | {error, not_found}.
-get_rule(RuleId) when is_list(RuleId) ->
+get_rule(RuleId) when is_binary(RuleId) ->
   gen_server:call(?SERVER, {get_rule, RuleId}).
 
 -spec list_rules() -> {ok, [rule()]}.
@@ -205,6 +205,7 @@ handle_call({get_backend, Name}, _From, State = #{backends := Backends}) ->
   end;
 
 handle_call(list_backends, _From, State = #{backends := Backends}) ->
+  logger:error(">>>list_backends!!!"),
   {reply, {ok, maps:values(Backends)}, State};
 
 %% Rule operations
@@ -317,7 +318,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec validate_backend(map()) -> {ok, string()} | {error, term()}.
 validate_backend(Backend) ->
   case Backend of
-    #{name := Name, url := _URL, pool_size := PoolSize} when is_list(Name) ->
+    #{name := Name, url := _URL, pool_size := PoolSize} when is_binary(Name) ->
       case validate_pool_size(PoolSize) of
         ok -> {ok, Name};
         Error -> Error
@@ -343,9 +344,9 @@ validate_pool_size(_) ->
 -spec validate_rule(map(), state()) -> {ok, string()} | {error, term()}.
 validate_rule(Rule, State) ->
   case Rule of
-    #{name := RuleName} when not is_list(RuleName) ->
+    #{name := RuleName} when not is_binary(RuleName) ->
       {error, invalid_rule_name};
-    #{name := RuleName, 'in' := _InPath, out := Out} when is_list(RuleName) ->
+    #{name := RuleName, 'in' := _InPath, out := Out} when is_binary(RuleName) ->
       case validate_out(Out, State) of
         ok -> {ok, RuleName};
         Error -> Error
@@ -374,7 +375,8 @@ validate_out(_, _State) ->
 check_backends_exist([], _State) ->
   ok;
 check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
-  case maps:is_key(Name, Backends) of
+  logger:error("checking name ~p on ~p", [Name, Backends]),
+  case maps:is_key(list_to_binary(Name), Backends) of
     false ->
       {error, referrenced_backend_not_found};
     true ->
@@ -383,8 +385,9 @@ check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
 
 -spec backend_in_use(string(), #{string() => rule()}) -> boolean().
 backend_in_use(BackendName, Rules) ->
+  BackendNameStr = binary_to_list(BackendName),
   maps:fold(fun(_RuleId, #{out := #{backends := Backends}}, Acc) ->
-                Acc orelse lists:member(BackendName, Backends)
+                Acc orelse lists:member(BackendNameStr, Backends)
             end, false, Rules).
 
 %% Start a pool for a backend using the pool supervisor
@@ -392,7 +395,7 @@ backend_in_use(BackendName, Rules) ->
 start_pool(Backend = #{name := Name, url := Url, pool_size := PoolSize}) ->
   case parse_url(Url) of
     {ok, Host, Port} ->
-      PoolId = list_to_atom("pool_" ++ Name),
+      PoolId = list_to_atom("pool_" ++ binary_to_list(Name)),
       case shrimp_pool_sup:add_pool(PoolId, Host, Port, PoolSize) of
         {ok, PoolPid} ->
           {ok, Backend#{pid => PoolPid}};
@@ -406,7 +409,7 @@ start_pool(Backend = #{name := Name, url := Url, pool_size := PoolSize}) ->
 %% Stop a pool
 -spec stop_pool(atom(), pid()) -> ok.
 stop_pool(BackendName, _Pid) ->
-  PoolId = list_to_atom("pool_" ++ BackendName),
+  PoolId = list_to_atom("pool_" ++ binary_to_list(BackendName)),
   case shrimp_pool_sup:remove_pool(PoolId) of
     ok -> ok;
     {error, not_found} -> ok;
@@ -416,10 +419,9 @@ stop_pool(BackendName, _Pid) ->
   end.
 
 %% Parse URL to extract host and port
--spec parse_url(string()) -> {ok, string(), non_neg_integer()} | {error, term()}.
+-spec parse_url(binary()) -> {ok, string(), non_neg_integer()} | {error, term()}.
 parse_url(Url) ->
-  UrlBin = list_to_binary(Url),
-  case uri_string:parse(UrlBin) of
+  case uri_string:parse(Url) of
     #{host := Host, port := Port} ->
       {ok, binary_to_list(Host), Port};
     #{host := Host} ->

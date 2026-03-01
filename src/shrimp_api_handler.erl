@@ -9,6 +9,7 @@ init(Req0, State) ->
   {ok, Req, State}.
 
 route_request(Method, Path, Req0) ->
+  logger:info("routing req ~p", [Req0]),
   case check_path(Path) of
     backend ->
       handle_backend(Method, Path, Req0);
@@ -74,15 +75,17 @@ handle_backend_request(_, _, Req) ->
 handle_list_backends(Req) ->
   case shrimp_model:list_backends() of
     {ok, Backends} ->
+      logger:info("backends ~p", [Backends]),
       CleanBackends = [sanitize_backend(B) || B <- Backends],
       shrimp_api_utils:reply_json(Req, 200, CleanBackends);
     {error, Reason} ->
+      logger:info("error getting backends ~p", [Reason]),
       Status = shrimp_api_utils:error_to_status(Reason),
       shrimp_api_utils:reply_error(Req, Status, Reason)
   end.
 
 handle_get_backend(Req, Name) ->
-  case shrimp_model:get_backend(binary_to_list(Name)) of
+  case shrimp_model:get_backend(Name) of
     {ok, Backend} ->
       CleanBackend = sanitize_backend(Backend),
       shrimp_api_utils:reply_json(Req, 200, CleanBackend);
@@ -118,7 +121,7 @@ handle_update_backend(Req0, Name) ->
   case decode_json(Body) of
     {ok, Data} ->
       Backend = prepare_backend(Data),
-      case shrimp_model:modify_backend(binary_to_list(Name), Backend) of
+      case shrimp_model:modify_backend(Name, Backend) of
         ok ->
           shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
         {error, backend_not_found} ->
@@ -132,7 +135,7 @@ handle_update_backend(Req0, Name) ->
   end.
 
 handle_delete_backend(Req0, Name) ->
-  case shrimp_model:remove_backend(binary_to_list(Name)) of
+  case shrimp_model:remove_backend(Name) of
     ok ->
       shrimp_api_utils:reply_json(Req0, 200, #{<<"status">> => <<"ok">>});
     {error, backend_not_found} ->
@@ -150,14 +153,9 @@ prepare_backend(Data) ->
   },
   maps:filter(fun(_, none) -> false; 
                  (_, _) -> true 
-              end, #{name => to_list(maps:get(<<"name">>, Data, none)),
-                     url => to_list(maps:get(<<"url">>, Data, none)),
+              end, #{name => maps:get(<<"name">>, Data, none),
+                     url => maps:get(<<"url">>, Data, none),
                      pool_size => PoolSize}).
-
-to_list(none) -> none;
-to_list(B) when is_binary(B) -> binary_to_list(B);
-to_list(B) when is_list(B) -> B;
-to_list(_) -> error("unsupported").
 
 %% Rule endpoints
 handle_rule(Method, Path, Req0) ->
@@ -193,7 +191,7 @@ handle_list_rules(Req) ->
   end.
 
 handle_get_rule(Req, Name) ->
-  case shrimp_model:get_rule(binary_to_list(Name)) of
+  case shrimp_model:get_rule(Name) of
     {ok, Rule} ->
       CleanRule = sanitize_rule(Rule),
       shrimp_api_utils:reply_json(Req, 200, CleanRule);
@@ -227,7 +225,7 @@ handle_update_rule(Req0, Name) ->
   case decode_json(Body) of
     {ok, Data} ->
       Rule = prepare_rule(Data),
-      case shrimp_model:modify_rule(binary_to_list(Name), Rule) of
+      case shrimp_model:modify_rule(Name, Rule) of
         ok ->
           shrimp_api_utils:reply_json(Req1, 200, #{<<"status">> => <<"ok">>});
         {error, rule_not_found} ->
@@ -241,7 +239,7 @@ handle_update_rule(Req0, Name) ->
   end.
 
 handle_delete_rule(Req0, Name) ->
-  case shrimp_model:remove_rule(binary_to_list(Name)) of
+  case shrimp_model:remove_rule(Name) of
     ok ->
       shrimp_api_utils:reply_json(Req0, 200, #{<<"status">> => <<"ok">>});
     {error, rule_not_found} ->
@@ -255,8 +253,8 @@ prepare_rule(Data) ->
   maps:filter(fun(_, none) -> false; 
                  (_, _) -> true 
               end, 
-              #{name => to_list(maps:get(<<"name">>, Data, none)),
-                'in' => to_list(maps:get(<<"in">>, Data, none)),
+              #{name => maps:get(<<"name">>, Data, none),
+                'in' => maps:get(<<"in">>, Data, none),
                 out => prepare_out(maps:get(<<"out">>, Data, #{})),
                 middlewares => maps:get(<<"middlewares">>, Data, [])}).
 
@@ -275,7 +273,7 @@ prepare_out(OutData) ->
 %% Utilities
 decode_json(Body) ->
   try
-    {ok, jsx:decode(Body, [return_maps])}
+    {ok, jsx:decode(Body, [return_maps, {labels, binary}])}
   catch
     _:_ -> {error, invalid_json}
   end.
@@ -285,8 +283,8 @@ sanitize_backend(Backend) ->
   BackendWithoutPid = maps:without([pid], Backend),
   PoolSize = maps:get(pool_size, BackendWithoutPid),
   #{
-    <<"name">> => list_to_binary(maps:get(name, BackendWithoutPid)),
-    <<"url">> => list_to_binary(maps:get(url, BackendWithoutPid)),
+    <<"name">> => maps:get(name, BackendWithoutPid),
+    <<"url">> => maps:get(url, BackendWithoutPid),
     <<"pool-size">> => #{
       <<"min">> => maps:get(min, PoolSize),
       <<"max">> => maps:get(max, PoolSize)
@@ -297,8 +295,8 @@ sanitize_backend(Backend) ->
 sanitize_rule(Rule) ->
   OutData = maps:get(out, Rule),
   #{
-    <<"name">> => list_to_binary(maps:get(name, Rule)),
-    <<"in">> => list_to_binary(maps:get('in', Rule)),
+    <<"name">> => maps:get(name, Rule),
+    <<"in">> => maps:get('in', Rule),
     <<"out">> => #{
       <<"backends">> => [list_to_binary(B) || B <- maps:get(backends, OutData)],
       <<"dispatcher">> => atom_to_binary(maps:get(dispatcher, OutData), utf8)

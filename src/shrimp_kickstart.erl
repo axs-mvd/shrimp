@@ -15,7 +15,7 @@ init(Req0, State0) ->
   FinalState = lists:foldl(fun(Function, State)->
                                Function(State)
                             end, #{req => Req0, 
-                                  body => Body}, 
+                                   body => Body}, 
                            funs()), 
 
   logger:info("FinalState ~p", [FinalState]),
