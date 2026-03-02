@@ -24,4 +24,7 @@ _checkouts/
 _rel/
 recompile.log
 
+rebar.config
+erlang_ls.config
+
 logs/

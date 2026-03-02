@@ -5,13 +5,14 @@
 -export([start/0]).
 -export([route/1]).
 
-
 -export([init/1]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
 -export([terminate/2]).
 -export([code_change/3]).
 
+%% only for test purposes
+-export([route/2, pick_backend/1]).
 
 start() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -40,7 +41,6 @@ route(_, []) ->
   no_match;
 
 route(Req, [#{name := Name,
-              backends := _,
               'in' := In} = Rule | Rules]) ->
   case match(cowboy_req:path(Req), Rule) of
     match -> 
@@ -62,13 +62,14 @@ strategy(#{dispatcher := _}) ->
   random.
 
 pick_backend(Rule) ->
-  pick_backend(strategy(Rule), Rule).
+  #{out := #{backends := Backends}} = Rule,
+  pick_backend(strategy(Rule), Backends).
 
-pick_backend(random, #{backends := Backends}) -> 
+pick_backend(random, Backends) -> 
   #{pid := PoolPid} = lists:nth(rand:uniform(length(Backends)), Backends),
   {ok, PoolPid};
 
 pick_backend(Strategy, Backends) -> 
   logger:error("illegal strategy ~p while choosing from ~p", [Strategy, Backends]),
-  none.
+  {error, illegal_strategy}.
 

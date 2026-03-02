@@ -43,25 +43,20 @@ do(#{pool := PoolPid,
                                    #{method => cowboy_req:method(Req), 
                                      url => cowboy_req:uri(Req),
                                      body => Body,
-                                     headers => change_headers(cowboy_req:headers(Req))}),
+                                     headers => add_headers(cowboy_req:headers(Req))}),
   shrimp_pool:release(PoolPid, Conn),
   Ctx#{reply => Resp}.
 
-%change_headers(#{<<"host">> := Host} = OriginalHeaders) ->
-%  maps:without([<<"host">>], 
-%               OriginalHeaders#{<<"X-Forwarded-For">> => Host,
-%                                <<"Host">> => <<"example.org">>}).
-
-change_headers(#{<<"host">> := Host} = OriginalHeaders) ->
-  OriginalHeaders#{<<"X-Forwarded-For">> => Host,
-                   <<"Host">> => <<"example.org">>}.
+add_headers(#{<<"host">> := Host} = OriginalHeaders) ->
+  OriginalHeaders#{<<"X-Forwarded-For">> => Host}.
 
 
 reply(#{req := Req,
         reply := #{headers := Headers, 
                    data := Body,
                    status := Status}} = Ctx) ->
-  cowboy_req:reply(Status, lists:foldl(fun({Key, Value}, M) -> maps:put(Key, Value, M)
+  cowboy_req:reply(Status, lists:foldl(fun({Key, Value}, M) -> 
+                                           maps:put(Key, Value, M)
                                        end, #{}, Headers), Body, Req),
   Ctx;
 

@@ -205,7 +205,6 @@ handle_call({get_backend, Name}, _From, State = #{backends := Backends}) ->
   end;
 
 handle_call(list_backends, _From, State = #{backends := Backends}) ->
-  logger:error(">>>list_backends!!!"),
   {reply, {ok, maps:values(Backends)}, State};
 
 %% Rule operations
@@ -222,7 +221,6 @@ handle_call({add_rule, Rule}, _From, State = #{rules := Rules} = FullState) ->
           {reply, {ok, RuleName}, NewState}
       end;
     {error, Reason} ->
-      logger:error("add rule didnt validate ~p", [Reason]),
       {reply, {error, Reason}, State}
   end;
 
@@ -244,7 +242,6 @@ handle_call({modify_rule, RuleName, Rule}, _From, State = #{rules := Rules} = Fu
           end
       end;
     {error, Reason} ->
-      logger:error("modify rule didnt validate ~p", [Reason]),
       {reply, {error, Reason}, State}
   end;
 
@@ -269,11 +266,14 @@ handle_call({get_rule, RuleName}, _From, State = #{rules := Rules}) ->
   end;
 
 handle_call(list_rules, _From, State = #{rules := Rules}) ->
-  {reply, {ok, maps:values(Rules)}, State};
+  SortedRules = lists:sort(fun(#{name := RuleNameX}, #{name := RuleNameY}) -> 
+                             RuleNameX =< RuleNameY
+                           end, maps:values(Rules)),
+  {reply, {ok, SortedRules}, State};
 
 %% Callback management
 handle_call({register_callback, Event, Pid}, _From, State = #{callbacks := Callbacks}) ->
-  EventPids = maps:get(Event, Callbacks, []),
+EventPids = maps:get(Event, Callbacks, []),
   case lists:member(Pid, EventPids) of
     true ->
       {reply, ok, State};
@@ -375,7 +375,6 @@ validate_out(_, _State) ->
 check_backends_exist([], _State) ->
   ok;
 check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
-  logger:error("checking name ~p on ~p", [Name, Backends]),
   case maps:is_key(list_to_binary(Name), Backends) of
     false ->
       {error, referrenced_backend_not_found};
