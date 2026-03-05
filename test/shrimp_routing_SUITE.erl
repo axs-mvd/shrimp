@@ -60,7 +60,8 @@ test_routing_match_first(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, [Rule, Rule#{name => <<"rule_2">>}]),
+  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
+                             [Rule, Rule#{name => <<"rule_2">>}]),
   ok.
 
 test_routing_match_last(_) -> 
@@ -70,7 +71,8 @@ test_routing_match_last(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
+  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
+                             [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
   ok.
 
 test_routing_pick_backend(_) ->
@@ -80,7 +82,8 @@ test_routing_pick_backend(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
+  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
+                             [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
   case shrimp_router:pick_backend(Rule) of
     <<"backend_1">> -> ok;
     <<"backend_2">> -> ok
