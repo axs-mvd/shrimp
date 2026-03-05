@@ -58,16 +58,16 @@ match(Path, #{'in' := In}) ->
     _ -> no_match 
   end.
 
-strategy(#{dispatcher := _}) ->
+strategy(#{out := #{dispatcher := _}}) ->
   random.
 
 pick_backend(Rule) ->
-  #{out := #{backends := Backends}} = Rule,
-  pick_backend(strategy(Rule), Backends).
+  #{out := #{backends := BackendNames}} = Rule,
+  pick_backend(strategy(Rule), BackendNames).
 
-pick_backend(random, Backends) -> 
-  #{pid := PoolPid} = lists:nth(rand:uniform(length(Backends)), Backends),
-  {ok, PoolPid};
+pick_backend(random, BackendNames) -> 
+  BackendName = lists:nth(rand:uniform(length(BackendNames)), BackendNames),
+  BackendName;
 
 pick_backend(Strategy, Backends) -> 
   logger:error("illegal strategy ~p while choosing from ~p", [Strategy, Backends]),
