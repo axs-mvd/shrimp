@@ -70,7 +70,7 @@ pick_backend(#{out := #{backends := BackendNames}} = Rule) ->
                            not is_backend_alive(Backend)
                        end, sort_backends(strategy(Rule), Backends)) of
     [] -> {error, no_backend_available};
-    [Backend | _] -> {ok, Backend}
+    [#{pid := Pid}| _] -> {ok, Pid}
   end.
 
 

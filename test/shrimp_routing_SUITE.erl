@@ -3,13 +3,19 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+-define(MECK_MODS, [
+                    shrimp_model
+                   ]).
+
 suite() ->
   [{timetrap, {seconds, 30}}].
 
 init_per_suite(Config) ->
+  meck:new(?MECK_MODS, [passthrough]),
   Config.
 
 end_per_suite(_Config) ->
+  meck:unload(),
   ok.
 
 init_per_testcase(_TestCase, Config) ->
@@ -30,7 +36,8 @@ all() ->
 
 
 test_routing_without_rules(_) ->
-  no_match = shrimp_router:route(#{path => <<"none">>}, []),
+  meck:expect(shrimp_model, list_rules, fun() -> {ok, []} end),
+  no_match = shrimp_router:pick_rule(#{path => <<"none">>}),
   ok.
 
 test_routing_simple_match(_) ->
@@ -40,7 +47,9 @@ test_routing_simple_match(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, [Rule]),
+  meck:expect(shrimp_model, list_rules, fun() -> {ok, [Rule]} end),
+ 
+  Rule = shrimp_router:pick_rule(#{path => <<"/api/kraken/borgen">>}),
   ok.
 
 test_routing_no_match(_) -> 
@@ -49,8 +58,9 @@ test_routing_no_match(_) ->
            out => #{backends => [<<"backend_1">>, <<"backend_2">>],
                     dispatcher => random},
            middlewares => []},
-
-  no_match = shrimp_router:route(#{path => <<"/api/xkraken/borgen">>}, [Rule]),
+  meck:expect(shrimp_model, list_rules, fun() -> {ok, [Rule]} end),
+ 
+  no_match = shrimp_router:pick_rule(#{path => <<"/api/xkraken/borgen">>}),
   ok.
 
 test_routing_match_first(_) -> 
@@ -60,8 +70,10 @@ test_routing_match_first(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
-                             [Rule, Rule#{name => <<"rule_2">>}]),
+  meck:expect(shrimp_model, list_rules, fun() -> 
+                                            {ok, [Rule, Rule#{name => <<"rule_2">>}]} 
+                                        end),
+  Rule = shrimp_router:pick_rule(#{path => <<"/api/kraken/borgen">>}),
   ok.
 
 test_routing_match_last(_) -> 
@@ -71,8 +83,10 @@ test_routing_match_last(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
-                             [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
+  meck:expect(shrimp_model, list_rules, fun() -> 
+                                            {ok, [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]} 
+                                        end),
+  Rule = shrimp_router:pick_rule(#{path => <<"/api/kraken/borgen">>}),
   ok.
 
 test_routing_pick_backend(_) ->
@@ -82,11 +96,23 @@ test_routing_pick_backend(_) ->
                     dispatcher => random},
            middlewares => []},
 
-  Rule = shrimp_router:route(#{path => <<"/api/kraken/borgen">>}, 
-                             [Rule#{name => <<"rule_2">>, 'in' => <<"/pepe/kraken">>}, Rule]),
+  BackendBase = #{url => <<"http://backend/api/">>,
+                  pool_size => #{min => 1, max =>2},
+                  pid => pid_1},
+
+  meck:expect(shrimp_model, get_backend, fun
+                                           (<<"backend_1">> = Name) -> 
+                                             {ok, BackendBase#{name => Name, 
+                                                               pid => pid_1}};
+                                           (<<"backend_2">> = Name) -> 
+                                             {ok, BackendBase#{name => Name, 
+                                                               pid => pid_2}}
+                                         end),
+
   case shrimp_router:pick_backend(Rule) of
-    <<"backend_1">> -> ok;
-    <<"backend_2">> -> ok
+    {ok, pid_1}-> ok;
+    {ok, pid_2}-> ok
   end,
+
   ok.
 
