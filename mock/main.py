@@ -7,7 +7,7 @@ import logging
 
 
 app = FastAPI()
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
 
 def log_info(req_body, res_body):
@@ -19,7 +19,6 @@ def log_info(req_body, res_body):
 async def some_middleware(request: Request, call_next):
     logging.info('headers: ' + str(request.headers))
     req_body = await request.body()
-    #await set_body(request, req_body)  # not needed when using FastAPI>=0.108.0.
     response = await call_next(request)
     
     chunks = []
@@ -37,6 +36,6 @@ def main(payload: Dict[Any, Any]):
     return payload
 
 
-@app.get("/")
+@app.get("/api/kraken")
 def read_root():
     return {"Hello": "World"}

@@ -375,7 +375,7 @@ validate_out(_, _State) ->
 check_backends_exist([], _State) ->
   ok;
 check_backends_exist([Name | Rest], State = #{backends := Backends}) ->
-  case maps:is_key(list_to_binary(Name), Backends) of
+  case maps:is_key(Name, Backends) of
     false ->
       {error, referrenced_backend_not_found};
     true ->

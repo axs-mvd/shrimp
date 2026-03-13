@@ -31,10 +31,11 @@ handle_cast(_, _) ->
   error(not_implemented).
 
 terminate(_, _) ->
-  error(not_implemented).
+  ok.
 
-code_change(_, _, _) ->
-  error(not_implemented).
+code_change(_, State, _) ->
+  {ok, State}.
+
 
 pick_rule(Req) ->
   Path = cowboy_req:path(Req),
@@ -54,7 +55,7 @@ match(Path, #{'in' := In}) ->
     _ -> false 
   end.
 
-strategy(#{out := #{dispatcher := Strategy}}) ->
+strategy(#{out := #{dispatcher := Strategy}}) when is_atom(Strategy)->
   Strategy.
 
 is_backend_alive(#{pid := _}) -> true.
@@ -63,7 +64,7 @@ pick_backend(no_match) -> {error, no_match};
 
 pick_backend(#{out := #{backends := BackendNames}} = Rule) ->
   Backends = lists:map(fun(BackendName) -> 
-                           {ok, Backend} = shrimp_model:get_backend(BackendName), 
+                           {ok, Backend} = shrimp_model:get_backend(to_binary(BackendName)), 
                            Backend 
                        end, BackendNames),
   case lists:dropwhile(fun(Backend) -> 
@@ -73,6 +74,12 @@ pick_backend(#{out := #{backends := BackendNames}} = Rule) ->
     [#{pid := Pid}| _] -> {ok, Pid}
   end.
 
+to_binary(B) when is_binary(B) -> B;
+to_binary(B) when is_list(B) -> list_to_binary(B).
+
+%to_atom(B) when is_atom(B) -> B;
+%to_atom(B) when is_binary(B) -> binary_to_atom(B);
+%to_atom(B) when is_list(B) -> list_to_atom(B).
 
 sort_backends(random, Backends) -> 
   lists:sort(fun(_, _) -> rand:uniform() > 0.5 end, Backends);

@@ -53,7 +53,7 @@ command(info,
           caller := CallerPid}) ->
   logger:error("gun connection DOWN aborting: ~p", [Reason]),
   error_logger:error_msg(Reason),
-  demonitor(MonitorRef, flush),
+  demonitor(MonitorRef, [flush]),
   notify_down(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
   exit(Reason);

@@ -261,14 +261,15 @@ prepare_rule(Data) ->
 prepare_out(OutData) ->
   DispatcherBin = maps:get(<<"dispatcher">>, OutData, <<"round_robin">>),
   Dispatcher = case DispatcherBin of
-                 <<"round_robin">> -> round_robin;
-                 Atom when is_atom(Atom) -> Atom;
-                 _ -> round_robin
+                 <<"random">> -> random;
+                 <<"first_alive">> -> first_alive;
+                 Strategy when is_binary(Strategy) -> binary_to_atom(Strategy);
+                 _ -> random
                end,
   #{
-    backends => [binary_to_list(B) || B <- maps:get(<<"backends">>, OutData, [])],
+    backends => maps:get(<<"backends">>, OutData, []),
     dispatcher => Dispatcher
-  }.
+   }.
 
 %% Utilities
 decode_json(Body) ->
