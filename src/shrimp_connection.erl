@@ -22,7 +22,12 @@ stop(Pid) ->
   gen_statem:stop(Pid).
 
 request(Pid, Req) ->
-  gen_statem:call(Pid, {request, Req}).
+  try gen_statem:call(Pid, {request, Req}, 3000)  of
+    Reply -> Reply
+  catch
+    exit:{timeout, _} ->
+      {error, timeout}
+  end.
 
 callback_mode() ->
   state_functions.
@@ -39,7 +44,6 @@ init([Pool, Host, Port]) ->
                   monitor_ref => MonitorRef,
                   conn => ConnPid}}.
 
-
 command({call, CallerPid}, 
         {request, Request}, 
         #{conn := ConnPid} = State) ->
@@ -51,12 +55,12 @@ command(info,
           monitor_ref := MonitorRef,
           pool := Pool,
           caller := CallerPid}) ->
-  logger:error("gun connection DOWN aborting: ~p", [Reason]),
+  logger:error("gun connection DOWN forcing restart: ~p", [Reason]),
   error_logger:error_msg(Reason),
   demonitor(MonitorRef, [flush]),
   notify_down(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
-  exit(Reason);
+  exit(self(), kill);
 command(info, Msg, Data) ->
   logger:debug("Got raw message in command: ~p", [Msg]),
   {keep_state, Data}.
@@ -121,11 +125,17 @@ receiving(info,
             monitor_ref := MonitorRef,
             pool := Pool,
             caller := CallerPid}) ->
-  error_logger:error_msg(Reason),
-  demonitor(MonitorRef, flush),
+  logger:error("got DOWN ~p forcing restart", [Reason]),
+    error_logger:error_msg(Reason),
+  demonitor(MonitorRef, [flush]),
   notify_down(Pool),
   gen_statem:reply(CallerPid, {error, {connection_down, Reason}}),
-  exit(Reason);
+  exit(self(), kill);
+receiving({call, _CallerPid}, 
+          Request, 
+          State) ->
+  logger:info("Got call in receiving: ~p~n", [Request]),
+  {keep_state, State};
 receiving(info, Msg, Data) ->
   logger:info("Got raw message in receiving: ~p~n", [Msg]),
   {keep_state, Data}.
@@ -138,17 +148,21 @@ add(A, B) ->
 code_change(_OldVsn, State, Data, _Extra) ->
   {ok, State, Data}.
 
-terminate(_Reason, _State, #{conn := ConnPid, monitor_ref := MonRef}) ->
+terminate(Reason, _State, #{conn := ConnPid, monitor_ref := MonRef}) ->
   demonitor(MonRef),
   gun:close(ConnPid),
-  logger:info("~p terminating.", [self()]),
+  logger:info("~p terminating. reason: ~p", [self(), Reason]),
   ok.
 
-notify_up(none) -> ok;
+notify_up(none) -> 
+  logger:warning("shrimp_connection ~p wanted to notify I'm up but there is no pool, shocking!", [self()]),
+  ok;
 notify_up(Pool) ->
   shrimp_pool:notify_up(Pool, self()).
 
-notify_down(none) -> ok;
+notify_down(none) -> 
+  logger:warning("shrimp_connection ~p wanted to notify I'm down but there is no pool, shocking!", [self()]),
+  ok;
 notify_down(Pool) ->
   shrimp_pool:notify_down(Pool, self()).
 

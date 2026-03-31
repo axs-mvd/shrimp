@@ -43,6 +43,8 @@ init([Host, Port, #{max := Max} = PoolSpec]) ->
               end, [rand:uniform(?MAX_ID) || _ <- lists:seq(1, Max)]),
   {ok, #{pool_spec => PoolSpec, 
          conn_ids => ConnIds,
+         host => Host,
+         port => Port,
          waiting => [],
          available => []}}. 
 
@@ -56,6 +58,7 @@ handle_call(acquire, _From, #{available := [ConnPid | ConnPids]} = State) ->
   {reply, {ok, ConnPid}, State#{available => ConnPids}};
 
 handle_call(acquire, From, #{available := [], waiting := Waiting} = State) ->
+  logger:info("wanted a connection but got queued ~p, number", [From, length(Waiting)]),
   {noreply, State#{waiting => lists:append(Waiting, [From])}};
 
 handle_call({release, ConnPid}, _From, #{waiting := [Waiter | Waiters]} = State) ->
@@ -79,7 +82,7 @@ handle_cast({up, ConnPid}, #{available := AvailableConns, waiting := []} = State
 
 handle_cast({down, ConnPid}, #{available := AvailableConns} = State) ->
   logger:warning("hate to say we lost a connection ~p we have currently ~p open conns", [ConnPid, length(AvailableConns)]),
-  {noreply, State#{available => lists:remove(ConnPid, AvailableConns)}};
+  {noreply, State#{available => lists:delete(ConnPid, AvailableConns)}};
 
 handle_cast(Request, State) ->
   logger:info("unhandled cast ~p", [Request]),
@@ -87,7 +90,7 @@ handle_cast(Request, State) ->
 
 handle_info({'DOWN', _MonitorRef, process, ConnPid, Reason}, #{available := AvailableConns} = State) ->
   logger:warning("Connection down ~p reason: ~p", [ConnPid, Reason]),
-  {noreply, State#{available => lists:remove(ConnPid, AvailableConns)}};
+  {noreply, State#{available => lists:delete(ConnPid, AvailableConns)}};
 
 handle_info(Info, State) ->
   logger:info("unhandled info ~p", [Info]),
@@ -114,3 +117,10 @@ add_unique(A, L) ->
     _ -> [A | L]
   end.
 
+%may_reconnect(#{available := AvailableConns, 
+%                pool_spec := #{max := MaxConnections}} 
+%              = State) when length(AvailableConns) < MaxConnections ->
+%  ok;
+%
+%may_reconnect()
+%

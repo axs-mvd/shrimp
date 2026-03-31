@@ -27,8 +27,12 @@ funs() -> [fun shrimp_kickstart:router/1,
            fun shrimp_kickstart:reply/1].
 
 router(#{req := Req} = Ctx) ->
-  {ok, PoolPid} = shrimp_router:route(Req),
-  Ctx#{pool => PoolPid};
+  case shrimp_router:route(Req) of
+    {ok, PoolPid} ->
+      Ctx#{pool => PoolPid};
+    {error, no_match} ->
+      Ctx
+  end;
 
 router(Ctx) -> 
   %@log here
@@ -39,13 +43,24 @@ do(#{pool := PoolPid,
      body := Body} = Ctx) ->
   {ok, Conn} = shrimp_pool:acquire(PoolPid),
   logger:info("acquired a connection ~p", [Conn]),
-  {ok, Resp} = shrimp_connection:request(Conn, 
-                                   #{method => cowboy_req:method(Req), 
-                                     url => cowboy_req:uri(Req),
-                                     body => Body,
-                                     headers => add_headers(cowboy_req:headers(Req))}),
-  shrimp_pool:release(PoolPid, Conn),
-  Ctx#{reply => Resp}.
+
+  NCtx = case shrimp_connection:request(Conn, 
+                                        #{method => cowboy_req:method(Req), 
+                                          url => cowboy_req:uri(Req),
+                                          body => Body,
+                                          headers => add_headers(cowboy_req:headers(Req))}) of
+           {ok, Resp} -> 
+             shrimp_pool:release(PoolPid, Conn),
+             Ctx#{reply => Resp};
+           {error, Error} -> 
+             logger:warning("conn request error closing connection: ~p", [Error]),
+             %%TODO not sure if we need to dos something here
+             Ctx
+         end,
+  NCtx;
+
+do(Ctx) ->
+  Ctx.
 
 add_headers(#{<<"host">> := Host} = OriginalHeaders) ->
   OriginalHeaders#{<<"X-Forwarded-For">> => Host}.
