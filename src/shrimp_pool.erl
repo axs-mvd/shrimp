@@ -9,7 +9,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(MAX_ID, 1000000).
 
 start_link(Id, Host, Port, #{max := _Max} = PoolSpec) ->
   gen_server:start_link({local, Id}, ?MODULE, [Host, Port, PoolSpec], []).
@@ -33,16 +32,21 @@ notify_down(ServerRef, ConnPid) ->
   gen_server:cast(ServerRef, {down, ConnPid}).
 
 init([Host, Port, #{max := Max} = PoolSpec]) ->
-  ConnIds = lists:map(
-              fun(Id) -> 
-                  case shrimp_connection_sup:add_connection(Id, self(), Host, Port) of
-                    {ok, ConnPid} -> monitor(process, ConnPid);
-                    Other -> logger:warning("error ~p", [Other]) 
-                  end,
-                  Id
-              end, [rand:uniform(?MAX_ID) || _ <- lists:seq(1, Max)]),
-  {ok, #{pool_spec => PoolSpec, 
-         conn_ids => ConnIds,
+  process_flag(trap_exit, true),
+  AllConns = lists:map(fun(_) ->
+                          {ok, Pid} = shrimp_connection:start_link(self(), Host, Port),
+                          Pid
+                      end, lists:seq(1, Max)),
+%  ConnIds = lists:map(
+%              fun(Id) -> 
+%                  case shrimp_connection_sup:add_connection(Id, self(), Host, Port) of
+%                    {ok, ConnPid} -> monitor(process, ConnPid);
+%                    Other -> logger:warning("error ~p", [Other]) 
+%                  end,
+%                  Id
+%              end, [rand:uniform(?MAX_ID) || _ <- lists:seq(1, Max)]),
+  {ok, #{all_conns => AllConns,
+         pool_spec => PoolSpec, 
          host => Host,
          port => Port,
          waiting => [],
@@ -50,7 +54,7 @@ init([Host, Port, #{max := Max} = PoolSpec]) ->
 
 handle_call(stop, _From, #{conn_ids := ConnIds} = State) ->
   lists:foreach(fun(ConnId) -> 
-                    shrimp_connection_sup:remove_connection(ConnId) 
+                    shrimp_connection:stop(ConnId)
                 end, ConnIds),
   {stop, normal, ok, State};
 
@@ -77,21 +81,26 @@ handle_cast({up, ConnPid}, #{waiting := [Waiter | Waiters]} = State) ->
   {noreply, State#{waiting => Waiters}};
 
 handle_cast({up, ConnPid}, #{available := AvailableConns, waiting := []} = State) ->
-  logger:debug("we have a new connection ~p we have ATM ~p open conns", [ConnPid, length(AvailableConns)]),
+  logger:info("we have a new connection ~p we have ATM ~p open conns", [ConnPid, length(AvailableConns) + 1]),
   {noreply, State#{available => add_unique(ConnPid, AvailableConns)}};
 
-handle_cast({down, ConnPid}, #{available := AvailableConns} = State) ->
+handle_cast({down, ConnPid}, #{available := AvailableConns, all_conns := AllConns} = State) ->
   logger:warning("hate to say we lost a connection ~p we have currently ~p open conns", [ConnPid, length(AvailableConns)]),
-  {noreply, State#{available => lists:delete(ConnPid, AvailableConns)}};
+  {noreply, State#{available => lists:delete(ConnPid, AvailableConns),
+                   all_conns => lists:delete(ConnPid, AllConns)}};
 
 handle_cast(Request, State) ->
   logger:info("unhandled cast ~p", [Request]),
   {noreply, State}.
 
-handle_info({'DOWN', _MonitorRef, process, ConnPid, Reason}, #{available := AvailableConns} = State) ->
+%handle_info({'DOWN', _MonitorRef, process, ConnPid, Reason}, #{available := AvailableConns, all_conns := AllConns} = State) ->
+%  logger:warning("Connection down ~p reason: ~p", [ConnPid, Reason]),
+%  {noreply, may_reconnect(State#{available => lists:delete(ConnPid, AvailableConns),
+%                                 all_conns => lists:delete(ConnPid, AllConns)})};
+handle_info({'EXIT', ConnPid, Reason}, #{available := AvailableConns, all_conns := AllConns} = State) ->
   logger:warning("Connection down ~p reason: ~p", [ConnPid, Reason]),
-  {noreply, State#{available => lists:delete(ConnPid, AvailableConns)}};
-
+  {noreply, may_reconnect(State#{available => lists:delete(ConnPid, AvailableConns),
+                                 all_conns => lists:delete(ConnPid, AllConns)})};
 handle_info(Info, State) ->
   logger:info("unhandled info ~p", [Info]),
   {noreply, State}. 
@@ -103,7 +112,7 @@ terminate(Reason, #{available := AvailableConns, waiting := Waiters} = State) ->
                 end, Waiters),
   logger:info("closing all conns"),
   lists:foreach(fun(Conn) -> 
-                    shrimp_connection_sup:remove_connection(Conn) 
+                    shrimp_connection:stop(Conn) 
                 end, AvailableConns),
   logger:info("terminate ~p ~p", [Reason, State]),
   ok.
@@ -117,10 +126,19 @@ add_unique(A, L) ->
     _ -> [A | L]
   end.
 
-%may_reconnect(#{available := AvailableConns, 
-%                pool_spec := #{max := MaxConnections}} 
-%              = State) when length(AvailableConns) < MaxConnections ->
-%  ok;
-%
-%may_reconnect()
-%
+may_reconnect(#{all_conns := AllConns,
+                pool_spec := #{max := Max},
+                host := Host,
+                port := Port} = State) when length(AllConns) < Max ->
+  logger:info("trying to reconnect..."),
+  NewConns = lists:map(fun(_) ->
+                           {ok, Pid} = shrimp_connection:start_link(self(), Host, Port),
+                           Pid
+                       end, lists:seq(length(AllConns), Max)),
+  State#{all_conns => lists:foldl(fun add_unique/2, AllConns, NewConns)};
+
+may_reconnect(State) -> State.
+
+  
+
+
